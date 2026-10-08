@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Finanzas - Control de Gastos</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="app"></div>
+
+    <script>
+        // Mock Data
+        const presupuestos = {
+            bogota: {
+                'gastos-fijos': 800410,
+                'ropa-y-compras': 500000,
+                'fines-semana': 1200000,
+                'entre-semana': 400000
+            },
+            rappi: {
+                'pañales-y-leche': 1100000,
+                'otros-gastos': 900000
+            }
+        };
+
+        const categoriasNombres = {
+            'gastos-fijos': '🏠 Gastos Fijos',
+            'ropa-y-compras': '👕 Ropa y Compras',
+            'fines-semana': '🎉 Fines de Semana',
+            'entre-semana': '💼 Entre Semana',
+            'pañales-y-leche': '👶 Pañales y Leche',
+            'otros-gastos': '🛒 Otros Gastos'
+        };
+
+        const gastosSimulados = [
+            { id: '1', monto: 150000, comercio: 'Carrefour', categoria: 'gastos-fijos', tarjeta: 'bogota', fecha: new Date(2026, 9, 5).toISOString() },
+            { id: '2', monto: 85000, comercio: 'Zara', categoria: 'ropa-y-compras', tarjeta: 'bogota', fecha: new Date(2026, 9, 4).toISOString() },
+            { id: '3', monto: 200000, comercio: 'Restaurante El Corral', categoria: 'fines-semana', tarjeta: 'bogota', fecha: new Date(2026, 9, 3).toISOString() },
+            { id: '4', monto: 45000, comercio: 'Rappi', categoria: 'pañales-y-leche', tarjeta: 'rappi', fecha: new Date(2026, 9, 6).toISOString() },
+            { id: '5', monto: 320000, comercio: 'Éxito', categoria: 'otros-gastos', tarjeta: 'rappi', fecha: new Date(2026, 9, 2).toISOString() },
+            { id: '6', monto: 120000, comercio: 'Walmart', categoria: 'entre-semana', tarjeta: 'bogota', fecha: new Date(2026, 9, 1).toISOString() }
+        ];
+
+        let gastos = [...gastosSimulados];
+
+        function calcularDashboard(gastos) {
+            const porTarjeta = { bogota: 0, rappi: 0 };
+            const porCategoria = {};
+            let total = 0;
+
+            Object.keys(categoriasNombres).forEach(cat => {
+                porCategoria[cat] = 0;
+            });
+
+            gastos.forEach(gasto => {
+                porTarjeta[gasto.tarjeta] = (porTarjeta[gasto.tarjeta] || 0) + gasto.monto;
+                porCategoria[gasto.categoria] = (porCategoria[gasto.categoria] || 0) + gasto.monto;
+                total += gasto.monto;
+            });
+
+            const presupuestoTotal = Object.values(presupuestos.bogota).reduce((a, b) => a + b, 0) +
+                                      Object.values(presupuestos.rappi).reduce((a, b) => a + b, 0);
+
+            return {
+                gastado: total,
+                presupuestoTotal: presupuestoTotal,
+                disponible: Math.max(0, presupuestoTotal - total),
+                porcentajeUsado: Math.round((total / presupuestoTotal) * 100),
+                gastosPorTarjeta: porTarjeta,
+                gastosPorCategoria: porCategoria,
+                alertas: []
+            };
+        }
+
+        function formatCurrency(value) {
+            return new Intl.NumberFormat('es-CO', {
+                style: 'currency',
+                currency: 'COP',
+                minimumFractionDigits: 0,
+            }).format(value);
+        }
+
+        function getCardInfo(tarjeta) {
+            return {
+                bogota: { nombre: 'Banco de Bogotá', icon: '🏦', corte: 15 },
+                rappi: { nombre: 'Rappi', icon: '🛵', corte: 29 }
+            }[tarjeta];
+        }
+
+        function getStatusColor(porcentaje) {
+            if (porcentaje >= 100) return 'bg-red-500';
+            if (porcentaje >= 90) return 'bg-orange-500';
+            if (porcentaje >= 75) return 'bg-yellow-500';
+            return 'bg-green-500';
+        }
+
+        function getStatusText(porcentaje) {
+            if (porcentaje >= 100) return 'Limite alcanzado';
+            if (porcentaje >= 90) return 'Casi al limite';
+            if (porcentaje >= 75) return 'Preocupante';
+            return 'Bajo control';
+        }
+
+        function calcularDiasFaltantes(diaCorte) {
+            const hoy = new Date();
+            const mesActual = hoy.getMonth();
+            const anyoActual = hoy.getFullYear();
+
+            let fechaCorte = new Date(anyoActual, mesActual, diaCorte);
+            if (fechaCorte < hoy) {
+                fechaCorte = new Date(anyoActual, mesActual + 1, diaCorte);
+            }
+
+            const diferencia = fechaCorte.getTime() - hoy.getTime();
+            const dias = Math.ceil(diferencia / (1000 * 60 * 60 * 24));
+
+            const proximaFecha = fechaCorte.toLocaleDateString('es-CO', { day: 'numeric', month: 'long' });
+
+            return { dias: Math.max(0, dias), proximaFecha };
+        }
+
+        function App() {
+            const dashboard = calcularDashboard(gastos);
+            const [newExpense, setNewExpense] = React.useState({
+                monto: '',
+                comercio: '',
+                categoria: 'gastos-fijos',
+                tarjeta: 'bogota'
+            });
+
+            const handleAddExpense = (e) => {
+                e.preventDefault();
+                if (newExpense.monto && newExpense.comercio) {
+                    const expense = {
+                        id: Date.now().toString(),
+                        monto: parseInt(newExpense.monto),
+                        comercio: newExpense.comercio,
+                        categoria: newExpense.categoria,
+                        tarjeta: newExpense.tarjeta,
+                        fecha: new Date().toISOString()
+                    };
+                    gastos = [expense, ...gastos];
+                    setNewExpense({ monto: '', comercio: '', categoria: 'gastos-fijos', tarjeta: 'bogota' });
+                    forceUpdate();
+                }
+            };
+
+            const [, forceUpdate] = React.useState();
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    {/* Header */}
+                    <header className="bg-white border-b border-gray-200 p-4">
+                        <h1 className="text-2xl font-bold text-gray-900">💰 Mi Finanzas</h1>
+                        <p className="text-sm text-gray-600">Control de gastos personales</p>
+                    </header>
+
+                    <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+                        {/* Summary Cards */}
+                        <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-3">
+                            <div className="rounded-lg border border-gray-200 bg-white p-4">
+                                <p className="text-xs text-gray-600">Presupuesto Total</p>
+                                <p className="text-lg font-bold text-gray-900">📊 {formatCurrency(dashboard.presupuestoTotal)}</p>
+                            </div>
+                            <div className="rounded-lg border border-gray-200 bg-white p-4">
+                                <p className="text-xs text-gray-600">Gastado</p>
+                                <p className="text-lg font-bold text-gray-900">💸 {formatCurrency(dashboard.gastado)}</p>
+                                <p className="text-xs text-gray-500">{dashboard.porcentajeUsado}% del total</p>
+                            </div>
+                            <div className="rounded-lg border border-gray-200 bg-white p-4">
+                                <p className="text-xs text-gray-600">Disponible</p>
+                                <p className="text-lg font-bold text-green-600">✅ {formatCurrency(dashboard.disponible)}</p>
+                            </div>
+                        </div>
+
+                        {/* Card Status */}
+                        <div className="mb-6">
+                            <h2 className="mb-3 text-base font-semibold text-gray-900">💳 Estado por Tarjeta</h2>
+                            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                                {['bogota', 'rappi'].map((tarjeta) => {
+                                    const info = getCardInfo(tarjeta);
+                                    const presupuestotal = Object.values(presupuestos[tarjeta]).reduce((a, b) => a + b, 0);
+                                    const consumo = dashboard.gastosPorTarjeta[tarjeta] || 0;
+                                    const porcentaje = (consumo / presupuestotal) * 100;
+                                    const { dias, proximaFecha } = calcularDiasFaltantes(info.corte);
+
+                                    return (
+                                        <div key={tarjeta} className="rounded-lg border border-gray-200 bg-white p-4">
+                                            <div className="flex items-start justify-between mb-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-lg">{info.icon}</span>
+                                                    <div>
+                                                        <p className="font-semibold text-xs text-gray-900">{info.nombre}</p>
+                                                        <p className="text-xs text-gray-500">Tarjeta</p>
+                                                    </div>
+                                                </div>
+                                                <p className="text-sm font-bold text-gray-900">{Math.round(porcentaje)}%</p>
+                                            </div>
+                                            <div className="mb-2">
+                                                <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+                                                    <div className={`h-full ${getStatusColor(porcentaje)} transition-all`} style={{ width: `${Math.min(porcentaje, 100)}%` }}></div>
+                                                </div>
+                                            </div>
+                                            <div className="mb-2 space-y-1 text-xs">
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-600">Consumo</span>
+                                                    <span className="font-semibold text-gray-900">{formatCurrency(consumo)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-600">Presupuesto</span>
+                                                    <span className="font-semibold text-gray-900">{formatCurrency(presupuestotal)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-600">Disponible</span>
+                                                    <span className={`font-semibold ${porcentaje >= 100 ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(Math.max(0, presupuestotal - consumo))}</span>
+                                                </div>
+                                            </div>
+                                            <div className="border-t border-gray-200 pt-2">
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <span className="text-gray-600">Corte en</span>
+                                                    <div className="text-right">
+                                                        <p className="font-bold text-gray-900">{dias}</p>
+                                                        <p className="text-gray-500">{dias === 1 ? 'día' : 'días'}</p>
+                                                    </div>
+                                                </div>
+                                                <p className="text-xs text-gray-500 mt-1">Próxima: {proximaFecha}</p>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Traffic Light */}
+                        <div className="mb-6">
+                            <div className={`rounded-lg border p-4 ${
+                                dashboard.porcentajeUsado >= 100 ? 'from-red-50 to-red-100 border-red-200' :
+                                dashboard.porcentajeUsado >= 90 ? 'from-orange-50 to-orange-100 border-orange-200' :
+                                dashboard.porcentajeUsado >= 75 ? 'from-yellow-50 to-yellow-100 border-yellow-200' :
+                                'from-green-50 to-green-100 border-green-200'
+                            } bg-gradient-to-r`}>
+                                <div className="flex items-center justify-between gap-4">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">
+                                            {dashboard.porcentajeUsado >= 100 && '🚨'}
+                                            {dashboard.porcentajeUsado >= 90 && dashboard.porcentajeUsado < 100 && '🔶'}
+                                            {dashboard.porcentajeUsado >= 75 && dashboard.porcentajeUsado < 90 && '⚠️'}
+                                            {dashboard.porcentajeUsado < 75 && '✅'}
+                                        </span>
+                                        <div>
+                                            <p className={`text-sm font-bold ${
+                                                dashboard.porcentajeUsado >= 100 ? 'text-red-900' :
+                                                dashboard.porcentajeUsado >= 90 ? 'text-orange-900' :
+                                                dashboard.porcentajeUsado >= 75 ? 'text-yellow-900' :
+                                                'text-green-900'
+                                            }`}>
+                                                {dashboard.porcentajeUsado >= 100 && '¡ALERTA!'}
+                                                {dashboard.porcentajeUsado >= 90 && dashboard.porcentajeUsado < 100 && '¡CUIDADO!'}
+                                                {dashboard.porcentajeUsado >= 75 && dashboard.porcentajeUsado < 90 && 'PRECAUCIÓN'}
+                                                {dashboard.porcentajeUsado < 75 && 'TODO OK'}
+                                            </p>
+                                            <p className={`text-xs opacity-75 ${
+                                                dashboard.porcentajeUsado >= 100 ? 'text-red-900' :
+                                                dashboard.porcentajeUsado >= 90 ? 'text-orange-900' :
+                                                dashboard.porcentajeUsado >= 75 ? 'text-yellow-900' :
+                                                'text-green-900'
+                                            }`}>{dashboard.porcentajeUsado}% del presupuesto</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+                                            <div className={`h-full ${
+                                                dashboard.porcentajeUsado >= 100 ? 'bg-red-500' :
+                                                dashboard.porcentajeUsado >= 90 ? 'bg-orange-500' :
+                                                dashboard.porcentajeUsado >= 75 ? 'bg-yellow-500' :
+                                                'bg-green-500'
+                                            }`} style={{ width: `${Math.min(dashboard.porcentajeUsado, 100)}%` }}></div>
+                                        </div>
+                                    </div>
+                                    <p className="text-lg font-bold text-right flex-shrink-0" style={{
+                                        color: dashboard.porcentajeUsado >= 100 ? '#991b1b' :
+                                               dashboard.porcentajeUsado >= 90 ? '#9a3412' :
+                                               dashboard.porcentajeUsado >= 75 ? '#854d0e' :
+                                               '#166534'
+                                    }}>{dashboard.porcentajeUsado}%</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Form and Chart */}
+                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                            <div className="lg:col-span-1">
+                                <div className="rounded-lg border border-gray-200 bg-white p-5">
+                                    <h3 className="mb-3 text-base font-semibold text-gray-900">➕ Agregar Gasto</h3>
+                                    <form onSubmit={handleAddExpense} className="space-y-3">
+                                        <div>
+                                            <label className="text-xs font-medium text-gray-600">Monto</label>
+                                            <input type="number" value={newExpense.monto} onChange={(e) => setNewExpense({...newExpense, monto: e.target.value})} className="w-full mt-1 rounded border border-gray-300 px-2 py-1 text-sm" placeholder="Ej: 50000" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-medium text-gray-600">Comercio</label>
+                                            <input type="text" value={newExpense.comercio} onChange={(e) => setNewExpense({...newExpense, comercio: e.target.value})} className="w-full mt-1 rounded border border-gray-300 px-2 py-1 text-sm" placeholder="Ej: Carrefour" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-medium text-gray-600">Tarjeta</label>
+                                            <select value={newExpense.tarjeta} onChange={(e) => setNewExpense({...newExpense, tarjeta: e.target.value})} className="w-full mt-1 rounded border border-gray-300 px-2 py-1 text-sm">
+                                                <option value="bogota">Bogotá</option>
+                                                <option value="rappi">Rappi</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-medium text-gray-600">Categoría</label>
+                                            <select value={newExpense.categoria} onChange={(e) => setNewExpense({...newExpense, categoria: e.target.value})} className="w-full mt-1 rounded border border-gray-300 px-2 py-1 text-sm">
+                                                {Object.entries(categoriasNombres).map(([key, val]) => (
+                                                    <option key={key} value={key}>{val}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <button type="submit" className="w-full bg-blue-600 text-white rounded px-3 py-2 text-sm font-medium hover:bg-blue-700">Agregar</button>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-2 space-y-6">
+                                {/* Categories Chart */}
+                                <div className="rounded-lg border border-gray-200 bg-white p-5">
+                                    <h3 className="mb-3 text-base font-semibold text-gray-900">📊 Gastos por Categoría</h3>
+                                    <div className="space-y-3">
+                                        {Object.entries(dashboard.gastosPorCategoria).filter(([, amount]) => amount > 0).sort((a, b) => b[1] - a[1]).map(([categoria, amount]) => {
+                                            const total = Object.values(dashboard.gastosPorCategoria).reduce((a, b) => a + b, 0);
+                                            const percentage = total > 0 ? (amount / total) * 100 : 0;
+                                            return (
+                                                <div key={categoria}>
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <span className="text-xs font-medium text-gray-700">{categoriasNombres[categoria]}</span>
+                                                        <span className="text-xs font-semibold text-gray-900">{formatCurrency(amount)}</span>
+                                                    </div>
+                                                    <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+                                                        <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all" style={{ width: `${percentage}%` }}></div>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 mt-1">{percentage.toFixed(1)}% del total</p>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Recent Transactions */}
+                                <div className="rounded-lg border border-gray-200 bg-white p-5">
+                                    <h3 className="mb-3 text-base font-semibold text-gray-900">📋 Últimos Gastos</h3>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-xs">
+                                            <thead className="border-b border-gray-200">
+                                                <tr>
+                                                    <th className="text-left py-2 px-3 font-medium text-gray-600">Fecha</th>
+                                                    <th className="text-left py-2 px-3 font-medium text-gray-600">Comercio</th>
+                                                    <th className="text-left py-2 px-3 font-medium text-gray-600">Categoría</th>
+                                                    <th className="text-left py-2 px-3 font-medium text-gray-600">Tarjeta</th>
+                                                    <th className="text-right py-2 px-3 font-medium text-gray-600">Monto</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {gastos.slice(0, 10).map((gasto) => (
+                                                    <tr key={gasto.id} className="border-b border-gray-100 hover:bg-gray-50">
+                                                        <td className="py-2 px-3">{new Date(gasto.fecha).toLocaleDateString('es-CO')}</td>
+                                                        <td className="py-2 px-3 font-medium text-gray-900">{gasto.comercio}</td>
+                                                        <td className="py-2 px-3 text-gray-600">{categoriasNombres[gasto.categoria]}</td>
+                                                        <td className="py-2 px-3">
+                                                            <span className={`inline-block rounded px-2 py-0.5 text-xs font-semibold ${gasto.tarjeta === 'bogota' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
+                                                                {gasto.tarjeta === 'bogota' ? 'Bogotá' : 'Rappi'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 px-3 text-right font-semibold text-gray-900">{formatCurrency(gasto.monto)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        // React minimal implementation
+        const React = {
+            useState: function(initialValue) {
+                let state = initialValue;
+                return [state, function(newValue) {
+                    state = newValue;
+                    ReactDOM.render(<App />, document.getElementById('app'));
+                }];
+            }
+        };
+
+        const ReactDOM = {
+            render: function(element, container) {
+                if (element.type) {
+                    const component = element.type(element.props);
+                    container.innerHTML = '';
+                    const div = document.createElement('div');
+                    div.innerHTML = component;
+                    container.appendChild(div.firstChild);
+                } else {
+                    container.innerHTML = element;
+                }
+            }
+        };
+
+        // Render app
+        document.getElementById('app').innerHTML = `
+            <div class="min-h-screen bg-gray-50">
+                <header class="bg-white border-b border-gray-200 p-4">
+                    <h1 class="text-2xl font-bold text-gray-900">💰 Mi Finanzas</h1>
+                    <p class="text-sm text-gray-600">Control de gastos personales</p>
+                </header>
+                <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+                    <div class="text-center py-12">
+                        <p class="text-lg text-gray-600">Cargando app...</p>
+                    </div>
+                </main>
+            </div>
+        `;
+
+        // Simple app rendering
+        setTimeout(() => {
+            const dashboard = calcularDashboard(gastos);
+
+            let html = `
+                <div class="min-h-screen bg-gray-50">
+                    <header class="bg-white border-b border-gray-200 p-4">
+                        <h1 class="text-2xl font-bold text-gray-900">💰 Mi Finanzas</h1>
+                        <p class="text-sm text-gray-600">Control de gastos personales</p>
+                    </header>
+                    <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+                        <div class="mb-6 grid grid-cols-1 gap-3 md:grid-cols-3">
+                            <div class="rounded-lg border border-gray-200 bg-white p-4">
+                                <p class="text-xs text-gray-600">Presupuesto Total</p>
+                                <p class="text-lg font-bold text-gray-900">📊 ${formatCurrency(dashboard.presupuestoTotal)}</p>
+                            </div>
+                            <div class="rounded-lg border border-gray-200 bg-white p-4">
+                                <p class="text-xs text-gray-600">Gastado</p>
+                                <p class="text-lg font-bold text-gray-900">💸 ${formatCurrency(dashboard.gastado)}</p>
+                                <p class="text-xs text-gray-500">${dashboard.porcentajeUsado}% del total</p>
+                            </div>
+                            <div class="rounded-lg border border-gray-200 bg-white p-4">
+                                <p class="text-xs text-gray-600">Disponible</p>
+                                <p class="text-lg font-bold text-green-600">✅ ${formatCurrency(dashboard.disponible)}</p>
+                            </div>
+                        </div>
+
+                        <div class="mb-6">
+                            <h2 class="mb-3 text-base font-semibold text-gray-900">💳 Estado por Tarjeta</h2>
+                            <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            `;
+
+            ['bogota', 'rappi'].forEach((tarjeta) => {
+                const info = getCardInfo(tarjeta);
+                const presupuestotal = Object.values(presupuestos[tarjeta]).reduce((a, b) => a + b, 0);
+                const consumo = dashboard.gastosPorTarjeta[tarjeta] || 0;
+                const porcentaje = (consumo / presupuestotal) * 100;
+                const { dias, proximaFecha } = calcularDiasFaltantes(info.corte);
+
+                html += `
+                    <div class="rounded-lg border border-gray-200 bg-white p-4">
+                        <div class="flex items-start justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="text-lg">${info.icon}</span>
+                                <div>
+                                    <p class="font-semibold text-xs text-gray-900">${info.nombre}</p>
+                                    <p class="text-xs text-gray-500">Tarjeta</p>
+                                </div>
+                            </div>
+                            <p class="text-sm font-bold text-gray-900">${Math.round(porcentaje)}%</p>
+                        </div>
+                        <div class="mb-2">
+                            <div class="h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+                                <div class="${getStatusColor(porcentaje)} h-full transition-all" style="width: ${Math.min(porcentaje, 100)}%"></div>
+                            </div>
+                        </div>
+                        <div class="mb-2 space-y-1 text-xs">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Consumo</span>
+                                <span class="font-semibold text-gray-900">${formatCurrency(consumo)}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Presupuesto</span>
+                                <span class="font-semibold text-gray-900">${formatCurrency(presupuestotal)}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Disponible</span>
+                                <span class="font-semibold ${porcentaje >= 100 ? 'text-red-600' : 'text-green-600'}">${formatCurrency(Math.max(0, presupuestotal - consumo))}</span>
+                            </div>
+                        </div>
+                        <div class="border-t border-gray-200 pt-2">
+                            <div class="flex items-center justify-between text-xs">
+                                <span class="text-gray-600">Corte en</span>
+                                <div class="text-right">
+                                    <p class="font-bold text-gray-900">${dias}</p>
+                                    <p class="text-gray-500">${dias === 1 ? 'día' : 'días'}</p>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">Próxima: ${proximaFecha}</p>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                            </div>
+                        </div>
+
+                        <div class="mb-6 rounded-lg border p-4 from-green-50 to-green-100 border-green-200 bg-gradient-to-r">
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-lg">✅</span>
+                                    <div>
+                                        <p class="text-sm font-bold text-green-900">TODO OK</p>
+                                        <p class="text-xs opacity-75 text-green-900">${dashboard.porcentajeUsado}% del presupuesto</p>
+                                    </div>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+                                        <div class="h-full bg-green-500" style="width: ${Math.min(dashboard.porcentajeUsado, 100)}%"></div>
+                                    </div>
+                                </div>
+                                <p class="text-lg font-bold text-right flex-shrink-0 text-green-900">${dashboard.porcentajeUsado}%</p>
+                            </div>
+                        </div>
+
+                        <div class="rounded-lg border border-gray-200 bg-white p-5">
+                            <h3 class="mb-3 text-base font-semibold text-gray-900">📋 Últimos Gastos</h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-xs">
+                                    <thead class="border-b border-gray-200">
+                                        <tr>
+                                            <th class="text-left py-2 px-3 font-medium text-gray-600">Fecha</th>
+                                            <th class="text-left py-2 px-3 font-medium text-gray-600">Comercio</th>
+                                            <th class="text-left py-2 px-3 font-medium text-gray-600">Categoría</th>
+                                            <th class="text-left py-2 px-3 font-medium text-gray-600">Tarjeta</th>
+                                            <th class="text-right py-2 px-3 font-medium text-gray-600">Monto</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+            `;
+
+            gastos.slice(0, 10).forEach((gasto) => {
+                html += `
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="py-2 px-3">${new Date(gasto.fecha).toLocaleDateString('es-CO')}</td>
+                        <td class="py-2 px-3 font-medium text-gray-900">${gasto.comercio}</td>
+                        <td class="py-2 px-3 text-gray-600">${categoriasNombres[gasto.categoria]}</td>
+                        <td class="py-2 px-3">
+                            <span class="inline-block rounded px-2 py-0.5 text-xs font-semibold ${gasto.tarjeta === 'bogota' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}">
+                                ${gasto.tarjeta === 'bogota' ? 'Bogotá' : 'Rappi'}
+                            </span>
+                        </td>
+                        <td class="py-2 px-3 text-right font-semibold text-gray-900">${formatCurrency(gasto.monto)}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            `;
+
+            document.getElementById('app').innerHTML = html;
+        }, 100);
+    </script>
+</body>
+</html>
